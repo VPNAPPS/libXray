@@ -31,8 +31,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        # CORRECTED: Updated Go version to match project dependency requirements.
-        go-version: '1.23.x'
+        # CORRECTED: Updated Go version to 1.24 to match project dependency requirements.
+        go-version: '1.24.x'
         cache-dependency-path: |
           libXray/go.sum
           Xray-core/go.sum
@@ -66,11 +66,16 @@ jobs:
     - name: Build Android AAR
       working-directory: libXray
       env:
-        # This is the simplest and most robust way. We only provide the linker flags
-        # needed for the 16KB page size and let gomobile handle the entire toolchain.
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         CGO_CFLAGS: "-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
       run: |
+        # CORRECTED: Explicitly set the C-Compiler (CC) to the NDK's clang. This removes ambiguity
+        # for the build tool without adding the complex flags that caused previous errors.
+        API_LEVEL=21
+        TARGET_TRIPLE="aarch64-linux-android"
+        export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang"
+        export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang++"
+
         echo "=== Starting Build with Simplified Environment ==="
         python3 build/main.py android
         
@@ -129,7 +134,7 @@ jobs:
       uses: actions/setup-go@v4
       with:
         # CORRECTED: Updated Go version for consistency.
-        go-version: '1.23.x'
+        go-version: '1.24.x'
         cache-dependency-path: |
           libXray/go.sum
           Xray-core/go.sum
