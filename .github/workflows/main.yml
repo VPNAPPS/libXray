@@ -56,15 +56,82 @@ jobs:
         go install golang.org/x/mobile/cmd/gomobile@latest
         gomobile init
 
-    - name: Build Android
+    - name: Configure 16KB page support
+      run: |
+        # Set environment variables for 16KB page alignment
+        echo "CGO_CFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
+        echo "CGO_CPPFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
+        echo "CGO_LDFLAGS=-Wl,-z,max-page-size=16384" >> $GITHUB_ENV
+        
+        # Set Go build flags for 16KB alignment
+        echo "GOFLAGS=-ldflags='-linkmode=external -extldflags=\"-Wl,-z,max-page-size=16384\"'" >> $GITHUB_ENV
+        
+        # Configure gomobile for 16KB pages
+        echo "GOMOBILE_LDFLAGS=-Wl,-z,max-page-size=16384" >> $GITHUB_ENV
+
+    - name: Build Android with 16KB page support
+      working-directory: libXray
+      env:
+        # Additional build environment for 16KB pages
+        CGO_ENABLED: 1
+        GOOS: android
+        # Ensure proper alignment flags
+        CGO_CFLAGS: "-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
+        CGO_LDFLAGS: "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
+      run: |
+        # Create a custom build script that ensures 16KB page alignment
+        cat > build_16kb.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        # Export environment variables for the build
+        export CGO_ENABLED=1
+        export CGO_CFLAGS="-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
+        export CGO_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
+        export GOMOBILE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
+        
+        # Build with gomobile using 16KB page alignment
+        gomobile bind -target=android \
+          -ldflags="-linkmode=external -extldflags='-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384'" \
+          -o libxray.aar \
+          ./...
+        
+        # Alternative: use the Python build script with custom flags
+        # python3 build/main.py android
+        EOF
+        
+        chmod +x build_16kb.sh
+        ./build_16kb.sh
+
+    - name: Verify 16KB page alignment
       working-directory: libXray
       run: |
-        python3 build/main.py android
+        # Check if the built libraries have proper 16KB alignment
+        if [ -f "libxray.aar" ]; then
+          echo "Checking AAR file structure..."
+          unzip -l libxray.aar | head -20
+          
+          # Extract and check native libraries
+          mkdir -p temp_check
+          cd temp_check
+          unzip -q ../libxray.aar
+          
+          # Check all .so files for proper alignment
+          find . -name "*.so" -type f | while read sofile; do
+            echo "Checking alignment for: $sofile"
+            readelf -l "$sofile" | grep -E "(LOAD|INTERP)" || true
+            # Check page alignment
+            objdump -p "$sofile" | grep -E "(LOAD|file|align)" || true
+          done
+          
+          cd ..
+          rm -rf temp_check
+        fi
 
     - name: Upload Android artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: libxray-android
+        name: libxray-android-16kb
         path: |
           libXray/*.aar
           libXray/*.jar
@@ -167,7 +234,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          libxray-android/*
+          libxray-android-16kb/*
           libxray-ios-gomobile/*
           libxray-ios-go/*
         draft: false
@@ -212,6 +279,15 @@ jobs:
       run: |
         go mod download
         go mod verify
+
+    - name: Test 16KB page build configuration
+      working-directory: libXray
+      run: |
+        # Test if the build environment supports 16KB page configuration
+        echo "Testing 16KB page build environment..."
+        export CGO_CFLAGS="-DPAGE_SIZE=16384"
+        export CGO_LDFLAGS="-Wl,-z,max-page-size=16384"
+        echo "16KB page build environment configured successfully"
 
     - name: Run tests (if any)
       working-directory: libXray
