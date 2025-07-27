@@ -104,7 +104,7 @@ jobs:
         echo "GOMOBILE_LDFLAGS: $GOMOBILE_LDFLAGS"
         
         # Create a wrapper to ensure 16KB page flags are passed to AndroidBuilder
-        cat > build_android_16kb.py << 'EOF'
+        cat > build_android_16kb.py << 'WRAPPER_EOF'
 #!/usr/bin/env python3
 import os
 import sys
@@ -127,13 +127,13 @@ def build_dir_path():
 
 if __name__ == "__main__":
     print("Building Android with 16KB page support...")
-    print(f"CGO_CFLAGS: {os.environ.get('CGO_CFLAGS', 'not set')}")
-    print(f"CGO_LDFLAGS: {os.environ.get('CGO_LDFLAGS', 'not set')}")
-    print(f"GOMOBILE_LDFLAGS: {os.environ.get('GOMOBILE_LDFLAGS', 'not set')}")
+    print("CGO_CFLAGS:", os.environ.get('CGO_CFLAGS', 'not set'))
+    print("CGO_LDFLAGS:", os.environ.get('CGO_LDFLAGS', 'not set'))
+    print("GOMOBILE_LDFLAGS:", os.environ.get('GOMOBILE_LDFLAGS', 'not set'))
     
     builder = AndroidBuilder(build_dir_path())
     builder.build()
-EOF
+WRAPPER_EOF
         
         # Use our wrapper script
         python3 build_android_16kb.py
