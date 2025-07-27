@@ -49,11 +49,12 @@ jobs:
         # Using a specific, stable NDK version is more reliable.
         ndk-version: 26.1.10909125
 
-    - name: Install build essentials
+    - name: Install build essentials and QEMU
       run: |
         sudo apt-get update -qq
-        # install 'binutils' to get the 'readelf' command, along with unzip.
-        sudo apt-get install -y --no-install-recommends build-essential binutils unzip
+        # CORRECTED: Install qemu-user-static to allow the host to run ARM64 binaries
+        # during the build process, which fixes the 'exec format error'.
+        sudo apt-get install -y --no-install-recommends build-essential binutils unzip qemu-user-static
       
     - name: Install and initialize gomobile
       run: |
@@ -66,7 +67,7 @@ jobs:
       env:
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
       run: |
-        # CORRECTED: Set CC/CXX to point to the NDK's clang compiler. This ensures the correct toolchain is used.
+        # Set environment for cross-compilation
         export CGO_ENABLED="1"
         export GOOS="android"
         export GOARCH="arm64"
@@ -77,8 +78,7 @@ jobs:
         export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang"
         export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang++"
         
-        # The '-target' flag is no longer needed in CFLAGS as we are using the target-specific compiler directly.
-        # Added -fPIC which is standard for shared libraries.
+        # -fPIC is required for shared libraries (.so files in the AAR)
         export CGO_CFLAGS="\
         -DPAGE_SIZE=16384 \
         -DMAX_PAGE_SIZE=16384 \
