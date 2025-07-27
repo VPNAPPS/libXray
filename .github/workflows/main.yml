@@ -68,28 +68,19 @@ jobs:
 
     - name: Configure 16KB page support
       run: |
-        # Find the correct Android header path
+        # Set NDK path
         NDK_PATH="${ANDROID_SDK_ROOT}/ndk/29.0.13599879"
-        SYSROOT_PATH="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         
-        # Check for Android headers in different possible locations
-        if [ -d "$SYSROOT_PATH/usr/include/android" ]; then
-          ANDROID_INCLUDE_PATH="$SYSROOT_PATH/usr/include"
-        elif [ -d "$NDK_PATH/sysroot/usr/include/android" ]; then
-          ANDROID_INCLUDE_PATH="$NDK_PATH/sysroot/usr/include"
-        else
-          # Find android headers dynamically
-          ANDROID_INCLUDE_PATH=$(find "$NDK_PATH" -name "android" -type d -path "*/include/android" | head -1 | sed 's|/android$||')
-        fi
-        
-        echo "Found Android headers at: $ANDROID_INCLUDE_PATH"
-        
-        # Set environment variables for 16KB page alignment with correct include path
-        echo "CGO_CFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -I${ANDROID_INCLUDE_PATH}" >> $GITHUB_ENV
+        # Set environment variables for 16KB page alignment with proper Android cross-compilation
+        echo "CGO_CFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
         echo "CGO_CPPFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
         echo "CGO_LDFLAGS=-Wl,-z,max-page-size=16384" >> $GITHUB_ENV
-        echo "CC=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> $GITHUB_ENV
-        echo "CXX=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" >> $GITHUB_ENV
+        
+        # Set Android-specific compiler settings
+        echo "CC=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+        echo "CXX=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+        echo "AR=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
+        
         # Ensure we're using the correct NDK
         echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/29.0.13599879" >> $GITHUB_ENV
 
@@ -99,9 +90,11 @@ jobs:
         # Additional build environment for 16KB pages
         CGO_ENABLED: 1
         GOOS: android
-        # Use Android NDK clang instead of gcc
-        CC: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-        CXX: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+        GOARCH: arm64
+        # Use Android NDK cross-compilation toolchain
+        CC: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+        CXX: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
+        AR: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
         # Explicitly set NDK path
         ANDROID_NDK_HOME: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879"
         # Add NDK toolchain to PATH
@@ -109,42 +102,58 @@ jobs:
         # Go proxy settings for network reliability
         GOPROXY: "https://proxy.golang.org,direct"
         GOSUMDB: "sum.golang.org"
+        # Prevent system header conflicts
+        CGO_CPPFLAGS: "-DANDROID"
       run: |
         # Export environment variables for the build
         export CGO_ENABLED=1
+        export GOOS=android
+        export GOARCH=arm64
         export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/29.0.13599879"
         export PATH="${ANDROID_SDK_ROOT}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
         export GOPROXY="https://proxy.golang.org,direct"
         export GOSUMDB="sum.golang.org"
         
-        # Set proper compilers (clang instead of gcc)
-        export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-        export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+        # Set proper Android cross-compilation toolchain
+        export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+        export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++"
+        export AR="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
         
-        # Set 16KB page flags with correct header path
-        export CGO_CFLAGS="${CGO_CFLAGS:-} -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
-        export CGO_LDFLAGS="${CGO_LDFLAGS:-} -Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        # Set 16KB page flags with Android-specific settings
+        export CGO_CFLAGS="-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -DANDROID"
+        export CGO_CPPFLAGS="-DANDROID"
+        export CGO_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         export GOMOBILE_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         
         # Display environment info
         echo "=== Build Environment ==="
         echo "Working directory: $(pwd)"
+        echo "GOOS: $GOOS"
+        echo "GOARCH: $GOARCH"
         echo "NDK path: $ANDROID_NDK_HOME"
         echo "CC: $CC"
         echo "CXX: $CXX"
+        echo "AR: $AR"
         echo "CGO_CFLAGS: $CGO_CFLAGS"
         echo "CGO_LDFLAGS: $CGO_LDFLAGS"
         
-        # Verify compilers exist
-        echo "=== Compiler Verification ==="
+        # Verify cross-compilation toolchain
+        echo "=== Toolchain Verification ==="
         if [ -f "$CC" ]; then
-          echo "Found clang compiler"
+          echo "Found Android clang compiler"
           "$CC" --version || echo "Clang version check failed"
+          "$CC" -dumpmachine || echo "Target machine check failed"
         else
-          echo "Clang compiler not found at $CC"
+          echo "Android clang compiler not found at $CC"
         fi
         
-        # Build with proper error handling
+        # Try to download geo files manually if the build script fails
+        echo "=== Pre-downloading geo files ==="
+        mkdir -p assets
+        curl -L -o assets/geoip.dat https://github.com/v2fly/geoip/releases/latest/download/geoip.dat || echo "Failed to download geoip.dat"
+        curl -L -o assets/geosite.dat https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat || echo "Failed to download geosite.dat"
+        
+        # Build
         echo "=== Starting Build ==="
         python3 build/main.py android
 
