@@ -82,12 +82,10 @@ jobs:
         ANDROID_NDK_HOME: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879"
         # Add NDK toolchain to PATH
         PATH: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin:${{ env.PATH }}"
+        # Go proxy settings for network reliability
+        GOPROXY: "https://proxy.golang.org,direct"
+        GOSUMDB: "sum.golang.org"
       run: |
-        # Create a custom build script that ensures 16KB page alignment
-        cat > build_16kb.sh << 'EOF'
-        #!/bin/bash
-        set -e
-        
         # Export environment variables for the build
         export CGO_ENABLED=1
         export CGO_CFLAGS="-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -I${ANDROID_SDK_ROOT}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
@@ -95,43 +93,33 @@ jobs:
         export GOMOBILE_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/29.0.13599879"
         export PATH="${ANDROID_SDK_ROOT}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+        export GOPROXY="https://proxy.golang.org,direct"
+        export GOSUMDB="sum.golang.org"
         
-        # Verify NDK path and environment
-        echo "Using NDK at: $ANDROID_NDK_HOME"
-        ls -la "$ANDROID_NDK_HOME" || echo "NDK directory not found"
-        
-        # Check if NDK headers are accessible
-        NDK_INCLUDE="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
-        echo "Checking NDK headers at: $NDK_INCLUDE"
-        ls -la "$NDK_INCLUDE/android/" 2>/dev/null || echo "Android headers not found at expected location"
-        
-        # Try alternative header locations
-        find "$ANDROID_NDK_HOME" -name "android" -type d 2>/dev/null | head -5
-        
-        # Display 16KB page configuration
-        echo "16KB Page Build Configuration:"
+        # Display environment info
+        echo "=== Build Environment ==="
+        echo "Working directory: $(pwd)"
+        echo "NDK path: $ANDROID_NDK_HOME"
         echo "CGO_CFLAGS: $CGO_CFLAGS"
         echo "CGO_LDFLAGS: $CGO_LDFLAGS"
-        echo "GOMOBILE_LDFLAGS: $GOMOBILE_LDFLAGS"
+        echo "PATH: $PATH"
         
-        # Handle potential network issues for geo data download
-        export GOPROXY=https://proxy.golang.org,direct
-        export GOSUMDB=sum.golang.org
+        # Verify NDK installation
+        echo "=== NDK Verification ==="
+        if [ -d "$ANDROID_NDK_HOME" ]; then
+          echo "NDK directory exists"
+          ls -la "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/android/" 2>/dev/null || echo "Android headers not found"
+        else
+          echo "NDK directory not found"
+        fi
         
-        # Use the existing Python build script - environment variables will be picked up automatically
+        # Build with retry logic
+        echo "=== Starting Build ==="
         python3 build/main.py android || {
-          echo "Build failed, checking for common issues..."
-          echo "Checking if geo files can be downloaded manually..."
-          # The build script likely tries to download geo files, let's see if we can help
-          curl -I https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat || true
-          curl -I https://github.com/v2fly/geoip/releases/latest/download/geoip.dat || true
-          echo "Retrying build..."
+          echo "Build failed, attempting retry..."
+          sleep 5
           python3 build/main.py android
         }
-        EOF
-        
-        chmod +x build_16kb.sh
-        ./build_16kb.sh
 
     - name: Verify 16KB page alignment
       working-directory: libXray
