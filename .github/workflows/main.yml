@@ -63,19 +63,35 @@ jobs:
 
     - name: Build Android AAR
       working-directory: libXray
-      # GOMOBILE_LDFLAGS is an env var for the python script, so it can stay here.
       env:
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
       run: |
-        # CORRECTED: Export all CGO variables within the script to ensure $ANDROID_NDK_HOME is expanded correctly by the shell.
+        # CORRECTED: Add target, API level, and architecture-specific include paths to CFLAGS and LDFLAGS.
         export CGO_ENABLED="1"
         export GOOS="android"
         export GOARCH="arm64"
-        export CGO_CFLAGS="-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -DANDROID --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-        export CGO_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384 --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+        
+        API_LEVEL=21
+        TARGET_TRIPLE="aarch64-linux-android"
+        
+        export CGO_CFLAGS="\
+        -DPAGE_SIZE=16384 \
+        -DMAX_PAGE_SIZE=16384 \
+        -DANDROID \
+        -D__ANDROID_API__=${API_LEVEL} \
+        -target ${TARGET_TRIPLE}${API_LEVEL} \
+        --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+        -I${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/${TARGET_TRIPLE}"
+        
+        export CGO_LDFLAGS="\
+        -Wl,-z,max-page-size=16384,-z,common-page-size=16384 \
+        --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+        -target ${TARGET_TRIPLE}${API_LEVEL}"
 
         echo "=== Build Environment ==="
-        env | grep -E 'GOOS|GOARCH|CGO|NDK'
+        echo "CGO_CFLAGS: ${CGO_CFLAGS}"
+        echo "CGO_LDFLAGS: ${CGO_LDFLAGS}"
+        env | grep -E 'GOOS|GOARCH|NDK'
         
         echo "=== Starting Build (letting python script handle geo files) ==="
         python3 build/main.py android
