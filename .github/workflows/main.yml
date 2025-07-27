@@ -63,8 +63,9 @@ jobs:
     - name: Install build essentials
       run: |
         # Install essential build tools that might be missing
-        sudo apt-get update -qq
-        sudo apt-get install -y build-essential gcc curl wget
+        apt-get update -qq
+        apt-get install -y build-essential gcc curl wget coreutils bash
+      shell: sh
 
     - name: Configure 16KB page support
       run: |
@@ -86,6 +87,7 @@ jobs:
 
     - name: Build Android with 16KB page support
       working-directory: libXray
+      shell: sh
       env:
         # Additional build environment for 16KB pages
         CGO_ENABLED: 1
@@ -132,26 +134,46 @@ jobs:
         echo "GOARCH: $GOARCH"
         echo "NDK path: $ANDROID_NDK_HOME"
         echo "CC: $CC"
-        echo "CXX: $CXX"
-        echo "AR: $AR"
         echo "CGO_CFLAGS: $CGO_CFLAGS"
         echo "CGO_LDFLAGS: $CGO_LDFLAGS"
         
-        # Verify cross-compilation toolchain
+        # Verify toolchain exists
         echo "=== Toolchain Verification ==="
         if [ -f "$CC" ]; then
           echo "Found Android clang compiler"
-          "$CC" --version || echo "Clang version check failed"
-          "$CC" -dumpmachine || echo "Target machine check failed"
         else
           echo "Android clang compiler not found at $CC"
+          ls -la "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/" | head -10
         fi
         
-        # Try to download geo files manually if the build script fails
+        # Create assets directory if needed
+        if command -v mkdir >/dev/null 2>&1; then
+          mkdir -p assets
+        else
+          test -d assets || python3 -c "import os; os.makedirs('assets', exist_ok=True)"
+        fi
+        
+        # Pre-download geo files
         echo "=== Pre-downloading geo files ==="
-        mkdir -p assets
-        curl -L -o assets/geoip.dat https://github.com/v2fly/geoip/releases/latest/download/geoip.dat || echo "Failed to download geoip.dat"
-        curl -L -o assets/geosite.dat https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat || echo "Failed to download geosite.dat"
+        if command -v curl >/dev/null 2>&1; then
+          curl -L -o assets/geoip.dat https://github.com/v2fly/geoip/releases/latest/download/geoip.dat || echo "Failed to download geoip.dat"
+          curl -L -o assets/geosite.dat https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat || echo "Failed to download geosite.dat"
+        else
+          python3 -c "
+import urllib.request
+import os
+try:
+    urllib.request.urlretrieve('https://github.com/v2fly/geoip/releases/latest/download/geoip.dat', 'assets/geoip.dat')
+    print('Downloaded geoip.dat')
+except Exception as e:
+    print(f'Failed to download geoip.dat: {e}')
+try:
+    urllib.request.urlretrieve('https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat', 'assets/geosite.dat')
+    print('Downloaded geosite.dat')
+except Exception as e:
+    print(f'Failed to download geosite.dat: {e}')
+"
+        fi
         
         # Build
         echo "=== Starting Build ==="
