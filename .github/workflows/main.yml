@@ -24,8 +24,7 @@ jobs:
         repository: XTLS/Xray-core
         path: Xray-core
 
-    # CORRECTED: Use a dedicated action to ensure QEMU is set up robustly.
-    # This is the standard and most reliable way to fix binfmt_misc issues on runners.
+    # Use a dedicated action to ensure QEMU is set up robustly.
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
@@ -56,7 +55,6 @@ jobs:
     - name: Install build essentials
       run: |
         sudo apt-get update -qq
-        # QEMU is now handled by the action above, so we only need the other tools.
         sudo apt-get install -y --no-install-recommends build-essential binutils unzip
       
     - name: Install and initialize gomobile
@@ -67,43 +65,13 @@ jobs:
     - name: Build Android AAR
       working-directory: libXray
       env:
+        # CORRECTED: This is the simplest and most robust way. We only provide the linker flags
+        # needed for the 16KB page size and let gomobile handle the entire toolchain.
+        # This avoids all the previous environment conflicts that caused the QEMU errors.
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        CGO_CFLAGS: "-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
       run: |
-        # Set QEMU_LD_PREFIX to the NDK's sysroot. This tells QEMU where to find the
-        # Android dynamic linker ('/system/bin/linker64'), fixing the execution error.
-        export QEMU_LD_PREFIX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-
-        # Set environment for cross-compilation
-        export CGO_ENABLED="1"
-        export GOOS="android"
-        export GOARCH="arm64"
-        
-        API_LEVEL=21
-        TARGET_TRIPLE="aarch64-linux-android"
-        
-        export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang"
-        export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang++"
-        
-        # -fPIC is required for shared libraries (.so files in the AAR)
-        export CGO_CFLAGS="\
-        -DPAGE_SIZE=16384 \
-        -DMAX_PAGE_SIZE=16384 \
-        -DANDROID \
-        -fPIC \
-        --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-        
-        export CGO_LDFLAGS="\
-        -Wl,-z,max-page-size=16384,-z,common-page-size=16384"
-
-        echo "=== Build Environment ==="
-        echo "QEMU_LD_PREFIX: ${QEMU_LD_PREFIX}"
-        echo "CC: ${CC}"
-        echo "CXX: ${CXX}"
-        echo "CGO_CFLAGS: ${CGO_CFLAGS}"
-        echo "CGO_LDFLAGS: ${CGO_LDFLAGS}"
-        env | grep -E 'GOOS|GOARCH|NDK'
-        
-        echo "=== Starting Build (letting python script handle geo files) ==="
+        echo "=== Starting Build with Simplified Environment ==="
         python3 build/main.py android
 
     - name: Verify 16KB page alignment
