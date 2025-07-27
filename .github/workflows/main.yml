@@ -52,7 +52,7 @@ jobs:
     - name: Install build essentials
       run: |
         sudo apt-get update -qq
-        # CORRECTED: install 'binutils' to get the 'readelf' command, along with unzip.
+        # install 'binutils' to get the 'readelf' command, along with unzip.
         sudo apt-get install -y --no-install-recommends build-essential binutils unzip
       
     - name: Install and initialize gomobile
@@ -63,26 +63,19 @@ jobs:
 
     - name: Build Android AAR
       working-directory: libXray
-      # All environment variables are set here for clarity and correctness.
-      # This avoids redundant `export` commands and potential scope issues.
       env:
         CGO_ENABLED: "1"
         GOOS: "android"
         GOARCH: "arm64"
-        # Flags for 16KB page alignment. All definitions are combined here.
-        CGO_CFLAGS: "-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -DANDROID"
-        CGO_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        # CORRECTED: Add NDK sysroot to CFLAGS and LDFLAGS to resolve missing header files like <android/log.h>.
+        CGO_CFLAGS: "-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -DANDROID --sysroot=${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+        CGO_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384 --sysroot=${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
       run: |
         echo "=== Build Environment ==="
         env | grep -E 'GOOS|GOARCH|CGO|NDK'
         
-        echo "=== Pre-downloading geo files ==="
-        mkdir -p assets
-        curl -L -o assets/geoip.dat https://github.com/v2fly/geoip/releases/latest/download/geoip.dat
-        curl -L -o assets/geosite.dat https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat
-        
-        echo "=== Starting Build ==="
+        echo "=== Starting Build (letting python script handle geo files) ==="
         python3 build/main.py android
 
     - name: Verify 16KB page alignment
