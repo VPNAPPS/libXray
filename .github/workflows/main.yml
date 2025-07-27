@@ -31,7 +31,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        # CORRECTED: Updated Go version to match project dependency requirements.
+        go-version: '1.23.x'
         cache-dependency-path: |
           libXray/go.sum
           Xray-core/go.sum
@@ -65,14 +66,21 @@ jobs:
     - name: Build Android AAR
       working-directory: libXray
       env:
-        # CORRECTED: This is the simplest and most robust way. We only provide the linker flags
+        # This is the simplest and most robust way. We only provide the linker flags
         # needed for the 16KB page size and let gomobile handle the entire toolchain.
-        # This avoids all the previous environment conflicts that caused the QEMU errors.
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         CGO_CFLAGS: "-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
       run: |
         echo "=== Starting Build with Simplified Environment ==="
         python3 build/main.py android
+        
+        echo "=== Verifying build output ==="
+        if [ ! -f "libxray.aar" ]; then
+          echo "::error::Build failed: libxray.aar was not created."
+          exit 1
+        fi
+        echo "Successfully created libxray.aar:"
+        ls -l libxray.aar
 
     - name: Verify 16KB page alignment
       working-directory: libXray
@@ -120,7 +128,8 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        # CORRECTED: Updated Go version for consistency.
+        go-version: '1.23.x'
         cache-dependency-path: |
           libXray/go.sum
           Xray-core/go.sum
