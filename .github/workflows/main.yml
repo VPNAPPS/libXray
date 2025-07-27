@@ -52,7 +52,8 @@ jobs:
     - name: Install build essentials
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends build-essential readelf unzip
+        # CORRECTED: install 'binutils' to get the 'readelf' command, along with unzip.
+        sudo apt-get install -y --no-install-recommends build-essential binutils unzip
       
     - name: Install and initialize gomobile
       run: |
@@ -96,6 +97,7 @@ jobs:
         # Check all .so files for correct page size alignment
         find . -name "*.so" -type f | while read sofile; do
           echo "--- Checking alignment for: $sofile"
+          # Use readelf (from binutils) to check the alignment of program headers
           readelf -l "$sofile" | grep -A1 "LOAD" | grep "p_align"
         done
         cd .. && rm -rf temp_check
@@ -186,6 +188,3 @@ jobs:
           libxray-ios-go/*
         generate_release_notes: true
       # The GITHUB_TOKEN is automatically available to this action
-
-  # The test-build job was mostly fine and is omitted for brevity,
-  # but no major fixes were needed there.
