@@ -66,7 +66,7 @@ jobs:
       env:
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
       run: |
-        # CORRECTED: Add target, API level, and architecture-specific include paths to CFLAGS and LDFLAGS.
+        # CORRECTED: Set CC/CXX to point to the NDK's clang compiler. This ensures the correct toolchain is used.
         export CGO_ENABLED="1"
         export GOOS="android"
         export GOARCH="arm64"
@@ -74,21 +74,24 @@ jobs:
         API_LEVEL=21
         TARGET_TRIPLE="aarch64-linux-android"
         
+        export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang"
+        export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${TARGET_TRIPLE}${API_LEVEL}-clang++"
+        
+        # The '-target' flag is no longer needed in CFLAGS as we are using the target-specific compiler directly.
+        # Added -fPIC which is standard for shared libraries.
         export CGO_CFLAGS="\
         -DPAGE_SIZE=16384 \
         -DMAX_PAGE_SIZE=16384 \
         -DANDROID \
-        -D__ANDROID_API__=${API_LEVEL} \
-        -target ${TARGET_TRIPLE}${API_LEVEL} \
-        --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
-        -I${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/${TARGET_TRIPLE}"
+        -fPIC \
+        --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         
         export CGO_LDFLAGS="\
-        -Wl,-z,max-page-size=16384,-z,common-page-size=16384 \
-        --sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
-        -target ${TARGET_TRIPLE}${API_LEVEL}"
+        -Wl,-z,max-page-size=16384,-z,common-page-size=16384"
 
         echo "=== Build Environment ==="
+        echo "CC: ${CC}"
+        echo "CXX: ${CXX}"
         echo "CGO_CFLAGS: ${CGO_CFLAGS}"
         echo "CGO_LDFLAGS: ${CGO_LDFLAGS}"
         env | grep -E 'GOOS|GOARCH|NDK'
