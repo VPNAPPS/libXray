@@ -50,11 +50,15 @@ jobs:
       run: |
         sdkmanager "ndk;29.0.13599879"
         echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/29.0.13599879" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/29.0.13599879" >> $GITHUB_ENV
+        echo "NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/29.0.13599879" >> $GITHUB_ENV
 
     - name: Install gomobile
       run: |
         go install golang.org/x/mobile/cmd/gomobile@latest
-        gomobile init
+        # Ensure clean gomobile initialization with correct NDK
+        gomobile clean
+        ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/29.0.13599879 gomobile init
 
     - name: Configure 16KB page support
       run: |
@@ -62,6 +66,8 @@ jobs:
         echo "CGO_CFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
         echo "CGO_CPPFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
         echo "CGO_LDFLAGS=-Wl,-z,max-page-size=16384" >> $GITHUB_ENV
+        # Ensure we're using the correct NDK
+        echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/29.0.13599879" >> $GITHUB_ENV
 
     - name: Build Android with 16KB page support
       working-directory: libXray
@@ -72,6 +78,8 @@ jobs:
         # Ensure proper alignment flags
         CGO_CFLAGS: "-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
         CGO_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        # Explicitly set NDK path
+        ANDROID_NDK_HOME: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879"
       run: |
         # Create a custom build script that ensures 16KB page alignment
         cat > build_16kb.sh << 'EOF'
@@ -83,9 +91,15 @@ jobs:
         export CGO_CFLAGS="-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
         export CGO_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         export GOMOBILE_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/29.0.13599879"
         
-        # Build with gomobile using 16KB page alignment
-        gomobile bind -target=android \
+        # Verify NDK path
+        echo "Using NDK at: $ANDROID_NDK_HOME"
+        ls -la "$ANDROID_NDK_HOME" || echo "NDK directory not found"
+        
+        # Build with gomobile using 16KB page alignment and proper API level
+        gomobile bind -target=android/arm64,android/amd64 \
+          -androidapi=21 \
           -ldflags="-linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" \
           -o libxray.aar \
           ./...
