@@ -60,12 +60,36 @@ jobs:
         gomobile clean
         ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/29.0.13599879 gomobile init
 
+    - name: Install build essentials
+      run: |
+        # Install essential build tools that might be missing
+        sudo apt-get update -qq
+        sudo apt-get install -y build-essential gcc curl wget
+
     - name: Configure 16KB page support
       run: |
-        # Set environment variables for 16KB page alignment
-        echo "CGO_CFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -I${ANDROID_SDK_ROOT}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" >> $GITHUB_ENV
+        # Find the correct Android header path
+        NDK_PATH="${ANDROID_SDK_ROOT}/ndk/29.0.13599879"
+        SYSROOT_PATH="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+        
+        # Check for Android headers in different possible locations
+        if [ -d "$SYSROOT_PATH/usr/include/android" ]; then
+          ANDROID_INCLUDE_PATH="$SYSROOT_PATH/usr/include"
+        elif [ -d "$NDK_PATH/sysroot/usr/include/android" ]; then
+          ANDROID_INCLUDE_PATH="$NDK_PATH/sysroot/usr/include"
+        else
+          # Find android headers dynamically
+          ANDROID_INCLUDE_PATH=$(find "$NDK_PATH" -name "android" -type d -path "*/include/android" | head -1 | sed 's|/android$||')
+        fi
+        
+        echo "Found Android headers at: $ANDROID_INCLUDE_PATH"
+        
+        # Set environment variables for 16KB page alignment with correct include path
+        echo "CGO_CFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -I${ANDROID_INCLUDE_PATH}" >> $GITHUB_ENV
         echo "CGO_CPPFLAGS=-DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384" >> $GITHUB_ENV
         echo "CGO_LDFLAGS=-Wl,-z,max-page-size=16384" >> $GITHUB_ENV
+        echo "CC=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> $GITHUB_ENV
+        echo "CXX=${NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" >> $GITHUB_ENV
         # Ensure we're using the correct NDK
         echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/29.0.13599879" >> $GITHUB_ENV
 
@@ -75,9 +99,9 @@ jobs:
         # Additional build environment for 16KB pages
         CGO_ENABLED: 1
         GOOS: android
-        # Ensure proper alignment flags and NDK headers
-        CGO_CFLAGS: "-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -I${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
-        CGO_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        # Use Android NDK clang instead of gcc
+        CC: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+        CXX: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
         # Explicitly set NDK path
         ANDROID_NDK_HOME: "${{ env.ANDROID_SDK_ROOT }}/ndk/29.0.13599879"
         # Add NDK toolchain to PATH
@@ -88,38 +112,41 @@ jobs:
       run: |
         # Export environment variables for the build
         export CGO_ENABLED=1
-        export CGO_CFLAGS="-O2 -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384 -I${ANDROID_SDK_ROOT}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
-        export CGO_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
-        export GOMOBILE_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
         export ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/29.0.13599879"
         export PATH="${ANDROID_SDK_ROOT}/ndk/29.0.13599879/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
         export GOPROXY="https://proxy.golang.org,direct"
         export GOSUMDB="sum.golang.org"
         
+        # Set proper compilers (clang instead of gcc)
+        export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+        export CXX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+        
+        # Set 16KB page flags with correct header path
+        export CGO_CFLAGS="${CGO_CFLAGS:-} -DPAGE_SIZE=16384 -DMAX_PAGE_SIZE=16384"
+        export CGO_LDFLAGS="${CGO_LDFLAGS:-} -Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        export GOMOBILE_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+        
         # Display environment info
         echo "=== Build Environment ==="
         echo "Working directory: $(pwd)"
         echo "NDK path: $ANDROID_NDK_HOME"
+        echo "CC: $CC"
+        echo "CXX: $CXX"
         echo "CGO_CFLAGS: $CGO_CFLAGS"
         echo "CGO_LDFLAGS: $CGO_LDFLAGS"
-        echo "PATH: $PATH"
         
-        # Verify NDK installation
-        echo "=== NDK Verification ==="
-        if [ -d "$ANDROID_NDK_HOME" ]; then
-          echo "NDK directory exists"
-          ls -la "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/android/" 2>/dev/null || echo "Android headers not found"
+        # Verify compilers exist
+        echo "=== Compiler Verification ==="
+        if [ -f "$CC" ]; then
+          echo "Found clang compiler"
+          "$CC" --version || echo "Clang version check failed"
         else
-          echo "NDK directory not found"
+          echo "Clang compiler not found at $CC"
         fi
         
-        # Build with retry logic
+        # Build with proper error handling
         echo "=== Starting Build ==="
-        python3 build/main.py android || {
-          echo "Build failed, attempting retry..."
-          sleep 5
-          python3 build/main.py android
-        }
+        python3 build/main.py android
 
     - name: Verify 16KB page alignment
       working-directory: libXray
