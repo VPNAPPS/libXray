@@ -24,6 +24,11 @@ jobs:
         repository: XTLS/Xray-core
         path: Xray-core
 
+    # CORRECTED: Use a dedicated action to ensure QEMU is set up robustly.
+    # This is the standard and most reliable way to fix binfmt_misc issues on runners.
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
@@ -46,28 +51,25 @@ jobs:
     - name: Setup Android SDK and NDK
       uses: android-actions/setup-android@v3
       with:
-        # Using a specific, stable NDK version is more reliable.
         ndk-version: 26.1.10909125
 
-    - name: Install build essentials and QEMU
+    - name: Install build essentials
       run: |
         sudo apt-get update -qq
-        # Install qemu-user-static to allow the host to run ARM64 binaries
-        # during the build process, which fixes the 'exec format error'.
-        sudo apt-get install -y --no-install-recommends build-essential binutils unzip qemu-user-static
+        # QEMU is now handled by the action above, so we only need the other tools.
+        sudo apt-get install -y --no-install-recommends build-essential binutils unzip
       
     - name: Install and initialize gomobile
       run: |
         go install golang.org/x/mobile/cmd/gomobile@latest
         gomobile init
-      # The ANDROID_NDK_HOME is now set globally by the setup-android action
 
     - name: Build Android AAR
       working-directory: libXray
       env:
         GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
       run: |
-        # CORRECTED: Set QEMU_LD_PREFIX to the NDK's sysroot. This tells QEMU where to find the
+        # Set QEMU_LD_PREFIX to the NDK's sysroot. This tells QEMU where to find the
         # Android dynamic linker ('/system/bin/linker64'), fixing the execution error.
         export QEMU_LD_PREFIX="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 
