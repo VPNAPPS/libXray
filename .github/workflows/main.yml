@@ -1,5 +1,9 @@
 name: Build libXray for Android
 
+# NOTE: NDK version 29.0.13599879 may not exist. This workflow will attempt to use it
+# but will fall back to NDK r29 beta 1 (29.0.13113456) if the specific version is not available.
+# Check https://github.com/android/ndk/releases for available versions.
+
 on:
   push:
     branches: [ main, develop ]
@@ -13,7 +17,7 @@ jobs:
     
     env:
       GO_VERSION: "1.24"
-      NDK_VERSION: "29.0.13599879"
+      NDK_VERSION: "29.0.13113456"  # NDK r29 beta 1 - adjust if specific version needed
       ANDROID_API_LEVEL: "34"
       
     steps:
@@ -39,9 +43,51 @@ jobs:
         python-version: '3.11'
         
     - name: Setup Android NDK
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: ${{ env.NDK_VERSION }}
+      id: setup-ndk
+      run: |
+        # First try the specific version requested (29.0.13599879)
+        # If it doesn't exist, fall back to available version
+        
+        echo "Attempting to find NDK version 29.0.13599879..."
+        
+        # Check if the specific version exists by trying SDK manager
+        if command -v sdkmanager >/dev/null 2>&1; then
+          echo "Trying to install via SDK manager..."
+          echo y | sdkmanager "ndk;29.0.13599879" 2>/dev/null || echo "Version 29.0.13599879 not found in SDK manager"
+        fi
+        
+        # If SDK manager fails or NDK not installed, download manually
+        if [[ ! -d "$ANDROID_SDK_ROOT/ndk/29.0.13599879" && ! -d "$ANDROID_SDK_ROOT/ndk-bundle" ]]; then
+          echo "Downloading NDK r29 beta 1 (29.0.13113456) as fallback..."
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-r29-beta1-linux.zip"
+          NDK_FILE="android-ndk-r29-beta1-linux.zip"
+          
+          wget -q "$NDK_URL" -O "$NDK_FILE"
+          unzip -q "$NDK_FILE"
+          
+          # Set up NDK path
+          NDK_HOME="$PWD/android-ndk-r29-beta1"
+          echo "ANDROID_NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
+          echo "NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+          
+          echo "NDK setup complete at: $NDK_HOME"
+        else
+          # Use existing NDK
+          if [[ -d "$ANDROID_SDK_ROOT/ndk/29.0.13599879" ]]; then
+            NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.13599879"
+          else
+            NDK_HOME="$ANDROID_SDK_ROOT/ndk-bundle"
+          fi
+          echo "ANDROID_NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
+          echo "NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+          echo "Using existing NDK at: $NDK_HOME"
+        fi
+        
+        # Verify NDK installation
+        echo "NDK verification:"
+        ls -la "$ANDROID_NDK_ROOT" || echo "NDK directory not found"
         
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
@@ -140,9 +186,26 @@ jobs:
         python-version: '3.11'
         
     - name: Setup Android NDK
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: ${{ env.NDK_VERSION }}
+      id: setup-ndk
+      run: |
+        # Download and setup NDK manually
+        NDK_URL="https://dl.google.com/android/repository/android-ndk-r29-beta1-linux.zip"
+        NDK_FILE="android-ndk-r29-beta1-linux.zip"
+        
+        echo "Downloading NDK from: $NDK_URL"
+        wget -q "$NDK_URL" -O "$NDK_FILE"
+        
+        echo "Extracting NDK..."
+        unzip -q "$NDK_FILE"
+        
+        # Set up NDK path
+        NDK_HOME="$PWD/android-ndk-r29-beta1"
+        echo "ANDROID_NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
+        echo "NDK_ROOT=$NDK_HOME" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$NDK_HOME" >> $GITHUB_ENV
+        
+        echo "NDK setup complete at: $NDK_HOME"
+        ls -la "$NDK_HOME"
         
     - name: Install gomobile
       run: |
