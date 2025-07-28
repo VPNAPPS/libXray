@@ -1,204 +1,240 @@
-name: Build LibXray for Android and iOS
+name: Build libXray for Android
 
 on:
   push:
     branches: [ main, develop ]
-    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build-android:
-    name: Build Android (16KB Page Size)
     runs-on: ubuntu-latest
+    
+    env:
+      GO_VERSION: "1.24"
+      NDK_VERSION: "29.0.13599879"
+      ANDROID_API_LEVEL: "34"
+      
     steps:
     - name: Checkout libXray
       uses: actions/checkout@v4
       with:
         path: libXray
-
+        
     - name: Checkout Xray-core
       uses: actions/checkout@v4
       with:
         repository: XTLS/Xray-core
         path: Xray-core
-
-    # Use a dedicated action to ensure QEMU is set up robustly.
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
+        
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.24.x'
-        cache-dependency-path: |
-          libXray/go.sum
-          Xray-core/go.sum
-
+        go-version: ${{ env.GO_VERSION }}
+        
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-
-    - name: Set up Java JDK
-      uses: actions/setup-java@v4
+        
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
       with:
-        distribution: 'temurin'
-        java-version: '17'
-
-    - name: Setup Android SDK and NDK
+        ndk-version: ${{ env.NDK_VERSION }}
+        
+    - name: Set up Android SDK
       uses: android-actions/setup-android@v3
       with:
-        ndk-version: 26.1.10909125
-
-    - name: Install build essentials
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends build-essential binutils unzip
-      
-    - name: Install and initialize gomobile
+        api-level: ${{ env.ANDROID_API_LEVEL }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+          
+    - name: Install gomobile
       run: |
         go install golang.org/x/mobile/cmd/gomobile@latest
+        go install golang.org/x/mobile/cmd/gobind@latest
         gomobile init
-
-    - name: Build Android AAR
-      working-directory: libXray
-      env:
-        GOMOBILE_LDFLAGS: "-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
-      run: |
-        # CORRECTED: Use a more standard cross-compilation setup by adding the NDK toolchain to the PATH
-        # and using the --target flag. This avoids toolchain conflicts that cause assembly errors.
-        export NDK_TOOLCHAIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-        export PATH="${NDK_TOOLCHAIN}:${PATH}"
-
-        API_LEVEL=21
-        TARGET_TRIPLE="aarch64-linux-android"
-
-        export CC="clang"
-        export CXX="clang++"
-        export AR="llvm-ar"
-
-        export CGO_CFLAGS="\
-        -DPAGE_SIZE=16384 \
-        -DMAX_PAGE_SIZE=16384 \
-        -fPIC \
-        --target=${TARGET_TRIPLE}${API_LEVEL}"
         
-        export CGO_LDFLAGS="-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
-
-        echo "=== Starting Build with Toolchain in PATH ==="
-        which clang
+    - name: Set environment variables
+      run: |
+        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
+        
+    - name: Verify environment
+      run: |
+        echo "Go version: $(go version)"
+        echo "Python version: $(python3 --version)"
+        echo "ANDROID_HOME: $ANDROID_HOME"
+        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "NDK_ROOT: $NDK_ROOT"
+        ls -la $ANDROID_NDK_ROOT/
+        which gomobile
+        gomobile version
+        
+    - name: Build libXray for Android
+      working-directory: ./libXray
+      run: |
+        # Ensure we're in the correct directory structure
+        cd ..
+        ls -la
+        
+        # Run the build script
+        cd libXray
         python3 build/main.py android
         
-        echo "=== Verifying build output ==="
-        if [ ! -f "libxray.aar" ]; then
-          echo "::error::Build failed: libxray.aar was not created."
-          exit 1
-        fi
-        echo "Successfully created libxray.aar:"
-        ls -l libxray.aar
-
-    - name: Verify 16KB page alignment
-      working-directory: libXray
+    - name: List build outputs
       run: |
-        echo "Verifying libxray.aar..."
-        unzip -l libxray.aar
+        find . -name "*.aar" -o -name "*.so" -o -name "*.a" | head -20
         
-        mkdir -p temp_check && cd temp_check
-        unzip -q ../libxray.aar
-        
-        # Check all .so files for correct page size alignment
-        find . -name "*.so" -type f | while read sofile; do
-          echo "--- Checking alignment for: $sofile"
-          # Use readelf (from binutils) to check the alignment of program headers
-          readelf -l "$sofile" | grep -A1 "LOAD" | grep "p_align"
-        done
-        cd .. && rm -rf temp_check
-
     - name: Upload Android artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: libxray-android-16kb
+        name: libxray-android-${{ github.sha }}
         path: |
-          libXray/*.aar
-          libXray/*.jar
-
-  build-ios:
-    name: Build iOS (${{ matrix.build-type }})
-    runs-on: macos-14
+          libXray/**/*.aar
+          libXray/**/*.so
+          libXray/**/*.a
+        retention-days: 30
+        
+  build-android-architectures:
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        build-type: ['gomobile', 'go']
+        arch: [arm, arm64, x86, x86_64]
+        
+    env:
+      GO_VERSION: "1.24"
+      NDK_VERSION: "29.0.13599879"
+      
     steps:
     - name: Checkout libXray
       uses: actions/checkout@v4
       with:
         path: libXray
-
+        
     - name: Checkout Xray-core
       uses: actions/checkout@v4
       with:
         repository: XTLS/Xray-core
         path: Xray-core
-
+        
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.24.x'
-        cache-dependency-path: |
-          libXray/go.sum
-          Xray-core/go.sum
-
+        go-version: ${{ env.GO_VERSION }}
+        
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-
-    - name: Select latest stable Xcode
-      uses: maxim-lobanov/setup-xcode@v1
+        
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
       with:
-        xcode-version: latest-stable
-
-    - name: Install and initialize gomobile
-      if: matrix.build-type == 'gomobile'
+        ndk-version: ${{ env.NDK_VERSION }}
+        
+    - name: Install gomobile
       run: |
         go install golang.org/x/mobile/cmd/gomobile@latest
+        go install golang.org/x/mobile/cmd/gobind@latest
         gomobile init
-
-    - name: Build iOS
-      working-directory: libXray
+        
+    - name: Set environment variables
       run: |
-        python3 build/main.py apple ${{ matrix.build-type }}
-
-    - name: Upload iOS artifacts
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
+        
+        # Set architecture-specific variables
+        case "${{ matrix.arch }}" in
+          arm)
+            echo "GOARCH=arm" >> $GITHUB_ENV
+            echo "GOOS=android" >> $GITHUB_ENV
+            echo "CC=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi34-clang" >> $GITHUB_ENV
+            echo "CXX=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi34-clang++" >> $GITHUB_ENV
+            ;;
+          arm64)
+            echo "GOARCH=arm64" >> $GITHUB_ENV
+            echo "GOOS=android" >> $GITHUB_ENV
+            echo "CC=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang" >> $GITHUB_ENV
+            echo "CXX=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang++" >> $GITHUB_ENV
+            ;;
+          x86)
+            echo "GOARCH=386" >> $GITHUB_ENV
+            echo "GOOS=android" >> $GITHUB_ENV
+            echo "CC=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android34-clang" >> $GITHUB_ENV
+            echo "CXX=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android34-clang++" >> $GITHUB_ENV
+            ;;
+          x86_64)
+            echo "GOARCH=amd64" >> $GITHUB_ENV
+            echo "GOOS=android" >> $GITHUB_ENV
+            echo "CC=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android34-clang" >> $GITHUB_ENV
+            echo "CXX=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android34-clang++" >> $GITHUB_ENV
+            ;;
+        esac
+        
+    - name: Build libXray for Android (${{ matrix.arch }})
+      working-directory: ./libXray
+      run: |
+        echo "Building for architecture: ${{ matrix.arch }}"
+        echo "GOARCH: $GOARCH"
+        echo "GOOS: $GOOS"
+        echo "CC: $CC"
+        echo "CXX: $CXX"
+        
+        # Build with the Python script
+        cd ..
+        cd libXray
+        python3 build/main.py android
+        
+    - name: Upload artifacts for ${{ matrix.arch }}
       uses: actions/upload-artifact@v4
       with:
-        name: libxray-ios-${{ matrix.build-type }}
+        name: libxray-android-${{ matrix.arch }}-${{ github.sha }}
         path: |
-          libXray/*.xcframework
-          libXray/*.framework
-          libXray/*.h
-        if-no-files-found: ignore
-
+          libXray/**/*.aar
+          libXray/**/*.so
+          libXray/**/*.a
+        retention-days: 30
+        
   create-release:
-    name: Create Release
-    needs: [build-android, build-ios]
+    needs: [build-android, build-android-architectures]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
-
-    - name: Display structure of downloaded files
-      run: ls -R
-
-    - name: Create Release and Upload Artifacts
-      uses: softprops/action-gh-release@v2
+      with:
+        path: artifacts
+        
+    - name: Create release package
+      run: |
+        mkdir -p release
+        find artifacts -name "*.aar" -exec cp {} release/ \;
+        find artifacts -name "*.so" -exec cp {} release/ \;
+        find artifacts -name "*.a" -exec cp {} release/ \;
+        
+        # Create a tar.gz with all artifacts
+        tar -czf libxray-android-build-${{ github.sha }}.tar.gz -C release .
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          libxray-android-16kb/*
-          libxray-ios-gomobile/*
-          libxray-ios-go/*
-        generate_release_notes: true
-      # The GITHUB_TOKEN is automatically available to this action
+          libxray-android-build-${{ github.sha }}.tar.gz
+          release/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
